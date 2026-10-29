@@ -9,6 +9,7 @@ netsh と違いスキャンを実際に実行する (WlanScan) ので、キャ�
 import ctypes as C
 import math
 import os
+import re
 import struct
 import threading
 import queue
@@ -218,16 +219,48 @@ def open_handle():
     return h
 
 
-def first_interface(h):
+IFACE_STATE = {0: "未準備", 1: "接続中", 2: "アドホック", 3: "切断処理中",
+               4: "未接続", 5: "関連付け中", 6: "探索中", 7: "認証中"}
+
+# Wi-Fi Direct の仮想アダプタを除外するためのパターン
+VIRTUAL_PAT = re.compile(r"virtual|direct", re.I)
+
+
+def list_interfaces(h):
+    """全 WLAN インターフェースを (GUID, 説明, 状態) のリストで返す。
+
+    WlanFreeMemory の前に値をコピーしておくこと。構造体をそのまま持ち回すと
+    解放済みメモリを指すビューになり、以降の API 呼び出しが不定に失敗する。
+    """
     pil = C.POINTER(IFLIST)()
-    if wlan.WlanEnumInterfaces(h, None, C.byref(pil)) != 0:
-        raise OSError("WlanEnumInterfaces failed")
-    if pil.contents.count == 0:
+    rc = wlan.WlanEnumInterfaces(h, None, C.byref(pil))
+    if rc != 0:
+        raise OSError(f"WlanEnumInterfaces failed (rc={rc})")
+    try:
+        n = pil.contents.count
+        arr = (IFINFO * n).from_address(C.addressof(pil.contents.ifs))
+        out = []
+        for i in range(n):
+            e = arr[i]
+            guid = GUID(e.guid.D1, e.guid.D2, e.guid.D3,
+                        (C.c_ubyte * 8)(*e.guid.D4))     # 値をコピーする
+            out.append((guid, e.desc, e.state))
+        return out
+    finally:
+        wlan.WlanFreeMemory(pil)
+
+
+def pick_interface(items):
+    """接続中のものを最優先し、次に仮想アダプタでないものを選ぶ。"""
+    if not items:
         raise OSError("無線インターフェースが見つかりません")
-    info = pil.contents.ifs[0]
-    guid, desc = info.guid, info.desc
-    wlan.WlanFreeMemory(pil)
-    return guid, desc
+    for it in items:
+        if it[2] == 1:                                   # wlan_interface_state_connected
+            return it
+    for it in items:
+        if not VIRTUAL_PAT.search(it[1]):
+            return it
+    return items[0]
 
 
 def current_connection(h, guid):
@@ -319,24 +352,31 @@ def interface_info():
     """スキャンせずにインターフェースの GUID 文字列と説明だけ取る。"""
     h = open_handle()
     try:
-        guid, desc = first_interface(h)
+        guid, desc, _ = pick_interface(list_interfaces(h))
         return guid_to_str(guid), desc
     finally:
         wlan.WlanCloseHandle(h, None)
 
 
 def scan(wait=5.0):
-    """スキャンを実行して (ネットワーク一覧, 接続情報, インターフェース名) を返す。"""
+    """スキャンを実行して (一覧, 接続情報, インターフェース名, 警告) を返す。"""
     h = open_handle()
     try:
-        guid, desc = first_interface(h)
-        wlan.WlanScan(h, C.byref(guid), None, None, None)
+        guid, desc, state = pick_interface(list_interfaces(h))
+        warn = ""
+
+        # スキャン中など一時的な理由でも失敗するので、ここでは中断せずキャッシュを読む。
+        rc = wlan.WlanScan(h, C.byref(guid), None, None, None)
+        if rc != 0:
+            warn = f"WlanScan が rc={rc} を返しました（キャッシュを表示します）"
         time.sleep(wait)
 
         pbl = C.POINTER(BSSLIST)()
-        if wlan.WlanGetNetworkBssList(h, C.byref(guid), None, 3, 0,
-                                      None, C.byref(pbl)) != 0:
-            raise OSError("WlanGetNetworkBssList failed")
+        rc = wlan.WlanGetNetworkBssList(h, C.byref(guid), None, 3, 0,
+                                        None, C.byref(pbl))
+        if rc != 0:
+            raise OSError(f"WlanGetNetworkBssList failed (rc={rc}) / "
+                          f"{desc} / 状態={IFACE_STATE.get(state, state)}")
 
         base = C.addressof(pbl.contents.entries)
         rows = {}
@@ -354,7 +394,7 @@ def scan(wait=5.0):
                 sta=-1 if sta is None else sta,
                 util=-1 if util is None else util * 100 // 255)
         wlan.WlanFreeMemory(pbl)
-        return list(rows.values()), current_connection(h, guid), desc
+        return list(rows.values()), current_connection(h, guid), desc, warn
     finally:
         wlan.WlanCloseHandle(h, None)
 
@@ -503,6 +543,7 @@ class App(tk.Tk):
         self._build()
         self.log(f"起動しました。DPI={dpi:.0f} ({self.scale*100:.0f}%) / 認識モード={dpi_mode}")
         self.log("[スキャン] を押すか、自動更新を有効にしてください。")
+        self._log_interfaces()
         self._refresh_band_state()
         self.after(50, self._apply_icon)
         self.after(300, self.start_scan)
@@ -580,6 +621,23 @@ class App(tk.Tk):
         self.logbox.see("end")
         self.logbox.configure(state="disabled")
 
+    def _log_interfaces(self):
+        """どのインターフェースを使うか起動時に記録する。障害切り分け用。"""
+        try:
+            h = open_handle()
+            try:
+                items = list_interfaces(h)
+            finally:
+                wlan.WlanCloseHandle(h, None)
+        except OSError as exc:
+            self.log(f"インターフェースを列挙できません: {exc}")
+            return
+        chosen = pick_interface(items)
+        self.log(f"無線インターフェース {len(items)} 件:")
+        for guid, desc, st in items:
+            mark = "→" if desc == chosen[1] else " "
+            self.log(f"   {mark} {desc} [{IFACE_STATE.get(st, st)}]")
+
     def _apply_icon(self):
         """ウィンドウとタスクバーのアイコンを差し替える。初回だけ生成に時間がかかる。"""
         try:
@@ -602,6 +660,8 @@ class App(tk.Tk):
         if self.regsub is None:
             self.band_lbl.configure(text="2.4GHz: 不明", foreground="#888")
             self.band_btn.configure(state="disabled", text="切り替え不可")
+            if announce:
+                self.log("ドライバ設定が見つからないため 2.4GHz の切り替えは使えません")
             return
 
         mode = read_wireless_mode(self.regsub)
@@ -675,8 +735,8 @@ class App(tk.Tk):
     def _worker(self):
         t0 = time.time()
         try:
-            rows, conn, desc = scan()
-            self.q.put(("ok", rows, conn, desc, time.time() - t0))
+            rows, conn, desc, warn = scan()
+            self.q.put(("ok", rows, conn, desc, warn, time.time() - t0))
         except Exception as exc:                                  # noqa: BLE001
             self.q.put(("err", exc))
 
@@ -685,8 +745,10 @@ class App(tk.Tk):
             while True:
                 item = self.q.get_nowait()
                 if item[0] == "ok":
-                    _, rows, conn, desc, dt = item
+                    _, rows, conn, desc, warn, dt = item
                     self.rows, self.conn = rows, conn
+                    if warn:
+                        self.log(warn)
                     note = ("  ※2.4GHz は無効のため 5/6GHz のみ表示しています"
                             if self.wmode == MODE_5GHZ else "")
                     self.log(f"{len(rows)} 件取得しました ({dt:.1f} 秒) / {desc}{note}")
