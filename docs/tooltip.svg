@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="230" viewBox="0 0 620 230"
+     font-family="'Yu Gothic UI','Meiryo','Hiragino Sans','Noto Sans JP','Segoe UI',sans-serif">
+
+  <rect width="620" height="230" fill="#f3f3f3"/>
+
+  <rect x="12" y="12" width="596" height="140" fill="#ffffff" stroke="#c0c0c0"/>
+
+  <rect x="13" y="40" width="594" height="28" fill="#e8f6e8"/>
+  <rect x="13" y="68" width="594" height="28" fill="#fbe3e3"/>
+  <rect x="13" y="96" width="594" height="28" fill="#fdf3dc"/>
+  <rect x="13" y="124" width="594" height="28" fill="#ffffff"/>
+
+  <rect x="12" y="12" width="596" height="28" fill="#f0f0f0" stroke="#c0c0c0"/>
+  <g font-size="12.5" fill="#333333" font-weight="600" text-anchor="middle">
+    <text x="60" y="31">PHY</text>
+    <text x="168" y="31">SIGNAL ▼</text>
+    <text x="280" y="31">RSSI</text>
+    <text x="370" y="31">STA</text>
+  </g>
+  <g stroke="#dcdcdc">
+    <path d="M110 12 v140 M226 12 v140 M330 12 v140 M414 12 v140 M530 12 v140"/>
+  </g>
+
+  <!-- hovered column header -->
+  <rect x="414" y="13" width="116" height="26" fill="#d8e8f8" stroke="#9ab8d8"/>
+  <text x="470" y="31" font-size="12.5" fill="#333333" font-weight="600" text-anchor="middle">UTIL</text>
+
+  <g font-family="'Cascadia Mono','Consolas','DejaVu Sans Mono',monospace"
+     font-size="12.5" fill="#1b1b1b">
+    <text x="60" y="59" text-anchor="middle">11ax</text><text x="214" y="59" text-anchor="end">92%</text>
+    <text x="318" y="59" text-anchor="end">-45dBm</text><text x="402" y="59" text-anchor="end">12</text>
+    <text x="518" y="59" text-anchor="end">38%</text>
+
+    <text x="60" y="87" text-anchor="middle">11ax</text><text x="214" y="87" text-anchor="end">88%</text>
+    <text x="318" y="87" text-anchor="end">-49dBm</text><text x="402" y="87" text-anchor="end">23</text>
+    <text x="518" y="87" text-anchor="end">74%</text>
+
+    <text x="60" y="115" text-anchor="middle">11ac</text><text x="214" y="115" text-anchor="end">78%</text>
+    <text x="318" y="115" text-anchor="end">-60dBm</text><text x="402" y="115" text-anchor="end">7</text>
+    <text x="518" y="115" text-anchor="end">52%</text>
+
+    <text x="60" y="143" text-anchor="middle">11n</text><text x="214" y="143" text-anchor="end">64%</text>
+    <text x="318" y="143" text-anchor="end">-71dBm</text>
+    <text x="402" y="143" text-anchor="end" fill="#777777">-</text>
+    <text x="518" y="143" text-anchor="end" fill="#777777">-</text>
+  </g>
+
+  <!-- tooltip -->
+  <g transform="translate(300,48)">
+    <rect x="0" y="0" width="306" height="122" rx="3" fill="#fffbe6" stroke="#9a9a7a"/>
+    <text font-size="11.5" fill="#222222">
+      <tspan x="11" y="20">チャネル使用率。AP がそのチャネルを</tspan>
+      <tspan x="11" y="36">「使用中」と判定した時間の割合です。</tspan>
+      <tspan x="11" y="52">自分のネットワークだけでなく、同じチャネルを使う</tspan>
+      <tspan x="11" y="68">他人の AP の電波も含まれます。</tspan>
+      <tspan x="11" y="92">〜40%: 余裕あり (緑)</tspan>
+      <tspan x="11" y="108">40〜70%: 混雑 (黄)　70%〜: 飽和 (赤)</tspan>
+    </text>
+  </g>
+
+  <!-- cursor -->
+  <g transform="translate(468,24)">
+    <path d="M0 0 L0 15 L4 11.5 L6.5 17 L9 16 L6.5 10.5 L11 10.5 Z"
+          fill="#ffffff" stroke="#000000" stroke-width="1.1"/>
+  </g>
+
+  <g font-size="11.5" fill="#555555">
+    <text x="12" y="190">列ヘッダにマウスを乗せると、その列の意味と読み方を表示します。</text>
+    <text x="12" y="210">400ms の遅延つきなので、表の上を通過しただけでは出ません。</text>
+  </g>
+</svg>
