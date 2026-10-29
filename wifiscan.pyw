@@ -128,13 +128,13 @@ def _render_wifi(size):
     def in_fg(px, py):
         dx, dy = px - cx, py - cy
         d = math.hypot(dx, dy)
-        if d <= dot:
+        if d <= dot:                                        # 中心のドット
             return True
-        if dy > 0:
+        if dy > 0:                                          # 下半分は描かない
             return False
-        if abs(math.degrees(math.atan2(dx, -dy))) > 46.0:
+        if abs(math.degrees(math.atan2(dx, -dy))) > 46.0:   # 扇形の範囲
             return False
-        return any(abs(d - r) <= half for r in radii)
+        return any(abs(d - r) <= half for r in radii)       # 3 本の円弧
 
     def cover(fn, x, y):
         hit = 0

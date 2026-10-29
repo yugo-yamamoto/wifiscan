@@ -151,13 +151,109 @@ netsh のローカライズされたテキストをパースしないので、�
 
 その他の実装メモ:
 
-- **アイコン** — Pillow を使わず、円弧を数式で描いて無圧縮 DIB の `.ico` を生成します。
-  初回のみ生成し、`%LOCALAPPDATA%\wifiscan\wifiscan.ico` にキャッシュします。
-  ICO の PNG 圧縮エントリは読み手の対応が割れる（GDI+ が読めない）ため DIB を使っています
+- **アイコン** — 画像ファイルを持たず、Python のコードが描いて `.ico` を組み立てます。
+  詳細は [アイコンもソースの中で作っています](#アイコンもソースの中で作っています) を参照
 - **DPI** — `SetProcessDpiAwarenessContext(PerMonitorV2)` を `Tk()` の生成前に呼び、
   `tk scaling` とピクセル指定値を実 DPI に合わせます。これをしないと高 DPI 環境で文字がぼやけます
 - **タスクバー** — `SetCurrentProcessExplicitAppUserModelID` を設定しないと、
   `pythonw.exe` として他の Python アプリとまとめられ、アイコンが反映されません
+
+## アイコンもソースの中で作っています
+
+このリポジトリに **アイコンの画像ファイルは入っていません**（`docs/` の説明用画像を除く）。
+ウィンドウとタスクバーに出る Wi-Fi アイコンは、`wifiscan.pyw` のコードが起動時に描いて
+`.ico` を組み立てたものです。
+
+![生成されるアイコン](docs/icon.png)
+
+配布物を `.pyw` 1 ファイルに保てること、そのために Pillow を足したくなかったことが理由です。
+やっていることは 3 段階です。
+
+### 1. ピクセルを数式で塗る
+
+円弧は「中心からの距離が半径 ± 線幅の半分」かつ「垂直からの角度が ±46 度以内」の領域、
+という判定で描きます。パスを引くのではなく、ピクセルごとに内外を判定します。
+
+```python
+def in_fg(px, py):
+    dx, dy = px - cx, py - cy
+    d = math.hypot(dx, dy)
+    if d <= dot:                                        # 中心のドット
+        return True
+    if dy > 0:                                          # 下半分は描かない
+        return False
+    if abs(math.degrees(math.atan2(dx, -dy))) > 46.0:   # 扇形の範囲
+        return False
+    return any(abs(d - r) <= half for r in radii)       # 3 本の円弧
+```
+
+このままでは輪郭がジャギーになるので、1 ピクセルを格子状に分割して内側に入った割合を
+そのままアルファ値にします。いわゆるスーパーサンプリングです。
+
+```python
+def cover(fn, x, y):
+    hit = 0
+    for i in range(n):
+        for j in range(n):
+            if fn(x + (i + 0.5) / n, y + (j + 0.5) / n):
+                hit += 1
+    return hit / (n * n)
+```
+
+分割数 `n` は 64px 以下で 3、それより大きいサイズでは 2 にしています。256px を 3×3 で
+処理すると純 Python では体感できるほど遅くなるためです。
+
+背景の角丸四角も同じ枠組みで、角の中心からの距離で判定しています。前景と背景それぞれの
+被覆率を求めてから色を混ぜるので、白い電波マークの縁も背景の青に対して滑らかに繋がります。
+
+### 2. DIB にする（PNG ではなく）
+
+ICO は Vista 以降 PNG 圧縮されたエントリを埋め込めるので、最初はそれで実装しました。
+ところが **GDI+ が読めず** `Icon.ToBitmap()` が `ArgumentOutOfRangeException` を投げます。
+ICO 内 PNG は読み手によって対応が割れるため、無圧縮の DIB に変更しました。
+
+```python
+# BITMAPINFOHEADER。高さは XOR + AND マスク分で 2 倍にする決まり。
+hdr = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0, 0, 0, 0, 0, 0)
+```
+
+DIB の行は **下から上** の順で、色は **BGRA** 並びです。32bit でアルファを持つので
+AND マスクは全 0 で構いません。ファイルは 370KB ほどになりますが、生成は初回だけです。
+
+### 3. ICO コンテナに詰める
+
+ヘッダに続いて 16 バイトのエントリが並び、その後ろに各サイズの実データが入ります。
+
+```python
+b = 0 if size >= 256 else size      # 256 は 0 で表す
+entries += struct.pack("<BBBBHHII", b, b, 0, 0, 1, 32, len(data), offset)
+```
+
+幅と高さが 1 バイトしかないため、256px は 0 と書く決まりになっています。
+収録サイズは 16 / 24 / 32 / 48 / 64 / 128 / 256 で、タイトルバー（16px）、Alt+Tab（32px）、
+高 DPI のタスクバー（40〜64px）、エクスプローラーの大アイコン（256px）をカバーします。
+
+### 生成とキャッシュ
+
+```python
+path = os.path.join(base, "wifiscan", "wifiscan.ico")
+if os.path.exists(path) and os.path.getsize(path) > 0:
+    return path
+```
+
+`%LOCALAPPDATA%\wifiscan\wifiscan.ico` に置き、2 回目以降は再利用します。生成は約 1 秒です。
+スクリプトと同じ場所には書きません。デスクトップに置いて使うことを想定しているためです。
+
+ウィンドウ表示後に `after(50, ...)` で走らせるので、起動そのものは待たされません。
+
+なお、タスクバーに反映させるにはこれが必要です。
+
+```python
+C.windll.shell32.SetCurrentProcessExplicitAppUserModelID("wifiscan.tk.app")
+```
+
+設定しないと `pythonw.exe` として他の Python アプリと同じグループにまとめられ、
+こちらのアイコンが使われません。
 
 ## 既知の制限
 
